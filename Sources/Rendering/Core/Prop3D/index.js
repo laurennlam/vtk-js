@@ -22,7 +22,7 @@ const GET_ARRAY = [
 // Property methods
 // ----------------------------------------------------------------------------
 
-export function prop(publicAPI, model) {
+export function prop3D(publicAPI, model) {
   function updateIdentityFlag() {
     if (!model.isIdentity) {
       return;
@@ -129,11 +129,11 @@ function newInstance(initialValues = {}) {
   model.matrix = mat4.create();
 
   // Object methods
-  prop(publicAPI, model);
+  prop3D(publicAPI, model);
 
   return Object.freeze(publicAPI);
 }
 
 // ----------------------------------------------------------------------------
 
-export default { newInstance, DEFAULT_VALUES, prop };
+export default { newInstance, DEFAULT_VALUES, prop3D };
