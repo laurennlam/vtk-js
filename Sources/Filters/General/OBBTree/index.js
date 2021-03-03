@@ -3,6 +3,7 @@ import macro from 'vtk.js/Sources/macro';
 import vtkCellArray from 'vtk.js/Sources/Common/Core/CellArray';
 import vtkLine from 'vtk.js/Sources/Common/DataModel/Line';
 import vtkMath from 'vtk.js/Sources/Common/Core/Math';
+import vtkMatrixBuilder from 'vtk.js/Sources/Common/Core/MatrixBuilder';
 import vtkOBBNode from 'vtk.js/Sources/Filters/General/OBBTree/OBBNode';
 import vtkPoints from 'vtk.js/Sources/Common/Core/Points';
 import vtkPolyData from 'vtk.js/Sources/Common/DataModel/PolyData';
@@ -10,9 +11,10 @@ import vtkPolyData from 'vtk.js/Sources/Common/DataModel/PolyData';
 import {
   getCellTriangles,
   Float32Concat,
+  // eslint-disable-next-line import/named
 } from 'vtk.js/Sources/Filters/General/OBBTree/helper';
 
-import { vec4 } from 'gl-matrix';
+import { vec4, mat4 } from 'gl-matrix';
 
 const { vtkErrorMacro } = macro;
 const VTK_DOUBLE_MAX = Number.MAX_SAFE_INTEGER;
@@ -512,6 +514,97 @@ function vtkOBBTree(publicAPI, model) {
   }
 
   /**
+   * Copy a vtkOBBNode into an other one
+   * @param {vtkOBBNode} nodeSource
+   * @param {vtkOBBNode} nodeTarget
+   */
+  function copyOBBNode(nodeSource, nodeTarget) {
+    nodeTarget.setCorner(nodeSource.getCorner());
+    nodeTarget.setAxes(nodeSource.getAxes());
+    nodeTarget.setCells(nodeSource.getCells());
+
+    if (nodeSource.getKids()) {
+      const kids = [vtkOBBNode.newInstance(), vtkOBBNode.newInstance()];
+      nodeTarget.setKids(kids);
+
+      copyOBBNode(nodeSource.getKids()[0], nodeTarget.getKids()[0]);
+      nodeTarget.getKids()[0].setParent(nodeTarget);
+
+      copyOBBNode(nodeSource.getKids()[1], nodeTarget.getKids()[1]);
+      nodeTarget.getKids()[1].setParent(nodeTarget);
+    }
+  }
+
+  /**
+   * Transform the whole OBB tree by using input transform
+   * @param {Transform} transform vtkjs Transform object
+   */
+  publicAPI.transform = (transform) => {
+    // Setup matrix used to transform vectors
+    const matrix = mat4.create();
+    mat4.copy(matrix, transform.getMatrix());
+    matrix[12] = 0;
+    matrix[13] = 0;
+    matrix[14] = 0;
+    matrix[15] = 1;
+    const transformVector = vtkMatrixBuilder
+      .buildFromRadian()
+      .setMatrix(matrix);
+
+    const obbStack = new Array(model.level + 1);
+    obbStack[0] = model.tree;
+    let depth = 1;
+    while (depth > 0) {
+      depth -= 1;
+      const node = obbStack[depth];
+
+      const corner = node.getCorner();
+      const max = node.getAxes()[0];
+      const mid = node.getAxes()[1];
+      const min = node.getAxes()[2];
+
+      transform.apply(corner);
+      transformVector.apply(max);
+      transformVector.apply(mid);
+      transformVector.apply(min);
+
+      node.setCorner(corner);
+      node.setAxes([max, mid, min]);
+
+      if (node.getKids() !== null) {
+        // push kids onto stack
+        obbStack[depth] = node.getKids()[0];
+        obbStack[depth + 1] = node.getKids()[1];
+        depth += 2;
+      }
+    }
+  };
+
+  /**
+   * Deep copy input node into class attribute tree
+   * @param {vtkOBBNode} tree
+   * @returns
+   */
+  publicAPI.deepCopy = (tree) => {
+    if (!tree) {
+      return;
+    }
+
+    publicAPI.setLevel(tree.getLevel());
+    publicAPI.setRetainCellLists(tree.getRetainCellLists());
+    publicAPI.setDataset(tree.getDataset());
+    publicAPI.setAutomatic(tree.getAutomatic());
+    publicAPI.setNumberOfCellsPerNode(tree.getNumberOfCellsPerNode());
+    publicAPI.setTolerance(tree.getTolerance());
+
+    const root = tree.getTree();
+    if (root) {
+      model.tree = vtkOBBNode.newInstance();
+      copyOBBNode(root, model.tree);
+    }
+  };
+
+  /**
    * A method to compute the OBB of a dataset without having to go through the
    * Execute method; It does set
    * @param {vtkPolyData} input
@@ -751,31 +844,24 @@ function vtkOBBTree(publicAPI, model) {
     OBBStackA[0] = model.tree;
     OBBStackB[0] = obbTreeB.getTree();
     let depth = 1;
-    let returnValue = 0;
-    let count = 0;
+    const returnValue = 0;
     // simulate recursion without overhead of real recursion.
     while (depth > 0 && returnValue > -1) {
       depth--;
       const nodeA = OBBStackA[depth];
       const nodeB = OBBStackB[depth];
       if (!publicAPI.disjointOBBNodes(nodeA, nodeB, XformBtoA)) {
+        // Collision
         if (!nodeA.getKids()) {
           if (!nodeB.getKids()) {
-            // then this is a pair of intersecting leaf nodes to process
-            returnValue = callback(nodeA, nodeB, XformBtoA, dataArg);
-            if (returnValue >= 0) {
-              count += returnValue;
-            } else {
-              count = returnValue;
-            }
-          } else {
-            // A is a leaf, but B goes deeper.
-            OBBStackA[depth] = nodeA;
-            OBBStackB[depth] = nodeB.getKids()[0];
-            OBBStackA[depth + 1] = nodeA;
-            OBBStackB[depth + 1] = nodeB.getKids()[1];
-            depth += 2;
+            return true;
           }
+          // A is a leaf, but B goes deeper.
+          OBBStackA[depth] = nodeA;
+          OBBStackB[depth] = nodeB.getKids()[0];
+          OBBStackA[depth + 1] = nodeA;
+          OBBStackB[depth + 1] = nodeB.getKids()[1];
+          depth += 2;
         } else if (!nodeB.getKids()) {
           // B is a leaf, but A goes deeper.
           OBBStackB[depth] = nodeB;
@@ -798,7 +884,7 @@ function vtkOBBTree(publicAPI, model) {
       }
     }
 
-    return count;
+    return false;
   };
 
   /**
@@ -830,10 +916,6 @@ function vtkOBBTree(publicAPI, model) {
   };
 
   publicAPI.buildLocator = () => {
-    // if (model.tree === null) {
-    //   return;
-    // }
-
     if (model.dataset === null) {
       vtkErrorMacro("Can't build OBB tree - no data available!");
       return;
@@ -896,6 +978,8 @@ export function extend(publicAPI, model, initialValues = {}) {
     'dataset',
     'tree',
     'maxLevel',
+    'level',
+    'retainCellLists',
   ]);
 
   // Make this a VTK object
