@@ -1,4 +1,5 @@
 import { CellType } from 'vtk.js/Sources/Common/DataModel/CellTypes/Constants';
+import vtkOBJReader from 'vtk.js/Sources/IO/Misc/OBJReader';
 
 /**
  * Get the correct point ID from a cell id
@@ -61,4 +62,28 @@ export function Float32Concat(first, second) {
   result.set(second, firstLength);
 
   return result;
+}
+
+/**
+ * Load an obj with point's colors
+ *
+ * @param {string} url path to the OBJ file
+ * @return Promise
+ * ---> success : Return vtkPolyData
+ * ---> failed : Error message
+ */
+export function loadOBJ(url) {
+  return new Promise((resolve, reject) => {
+    const reader = vtkOBJReader.newInstance();
+    reader.setUrl(url).then(
+      () => {
+        const data = reader.getOutputData();
+        resolve(data);
+      },
+      () => {
+        // eslint-disable-next-line prefer-promise-reject-errors
+        reject('Error when loading ', url);
+      }
+    );
+  });
 }

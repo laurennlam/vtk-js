@@ -520,18 +520,21 @@ function vtkOBBTree(publicAPI, model) {
    */
   function copyOBBNode(nodeSource, nodeTarget) {
     nodeTarget.setCorner(nodeSource.getCorner());
-    nodeTarget.setAxes(nodeSource.getAxes());
-    nodeTarget.setCells(nodeSource.getCells());
+    const axes = nodeSource.getAxes();
+    const newAxes = [[...axes[0]], [...axes[1]], [...axes[2]]];
+    nodeTarget.setAxes(newAxes);
+    nodeTarget.setCells([...nodeSource.getCells()]);
 
     if (nodeSource.getKids()) {
-      const kids = [vtkOBBNode.newInstance(), vtkOBBNode.newInstance()];
-      nodeTarget.setKids(kids);
+      const kids0 = vtkOBBNode.newInstance();
+      kids0.setParent(nodeTarget);
+      const kids1 = vtkOBBNode.newInstance();
+      kids1.setParent(nodeTarget);
 
-      copyOBBNode(nodeSource.getKids()[0], nodeTarget.getKids()[0]);
-      nodeTarget.getKids()[0].setParent(nodeTarget);
+      copyOBBNode(nodeSource.getKids()[0], kids0);
+      copyOBBNode(nodeSource.getKids()[1], kids1);
 
-      copyOBBNode(nodeSource.getKids()[1], nodeTarget.getKids()[1]);
-      nodeTarget.getKids()[1].setParent(nodeTarget);
+      nodeTarget.setKids([kids0, kids1]);
     }
   }
 
